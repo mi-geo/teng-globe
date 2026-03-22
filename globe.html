@@ -82,7 +82,7 @@
 </style>
 </head>
 <body>
-<h1>Places I've Been</h1>
+<h1>Teng's Travel Globe</h1>
 <canvas id="c"></canvas>
 
 
@@ -110,21 +110,24 @@
 const COLOR_ATTR = "batch";
 
 const COLOR_MAP = {
-  "Blue":     "#3b82f6",
-  "Green":    "#22c55e",
-  "Brown":    "#8b5e3c",
-  "Teal":     "#14b8a6",
-  "Purple":   "#8b5cf6",
-  "Cyan":     "#06b6d4",
-  "Orange":   "#f97316",
-  "Orchid":   "#ba55d3",
-  "Magenta":  "#d946ef",
-  "Red":      "#ef4444",
-  "Dark Red": "#991b1b",
-  "Yellow":   "#eab308",
-  "Grey":     "#6b6b6b",
-  "White":    "#f5f5f5",
-  "default":  "#94a3b8"
+  "Blue":   	  "#3b82f6",
+  "Green":    	"#22c55e",
+  "Brown": 	    "#8b5e3c",
+  "Teal":   	  "#14b8a6",
+  "Purple":   	"#8b5cf6",
+  "Cyan":   	  "#06b6d4",
+  "Orange":   	"#f97316",
+  "Orchid":	    "#ba55d3",
+  "Magenta":	  "#d946ef",
+  "Red":      	"#ef4444",
+  "Dark Red": 	"#991b1b",
+  "Yellow":   	"#eab308",
+  "Grey":     	"#4d4a3f",	// "#6b6b6b",  
+	"Light Grey": "#919090",
+	"Coral": 			"#8f5038",
+
+  "White":    	"#6b6b6b",  // f5f5f5
+  "default":  	"#94a3b8"
 };
 
 function getColor(feature) {
@@ -178,9 +181,9 @@ function loadJSON(url, needsRewind) {
 
 function updatePlaces() {
   PLACES = [
+	  ...(activeLayers.adm1  ? RAW_ADM1  : []),
     ...(activeLayers.china ? RAW_CHINA : []),
-    ...(activeLayers.usa   ? RAW_USA   : []),
-    ...(activeLayers.adm1  ? RAW_ADM1  : [])
+    ...(activeLayers.usa   ? RAW_USA   : [])
   ];
 }
 
@@ -195,13 +198,14 @@ fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
 
 // ── LOAD DATA FILES ──────────────────────────────────────────────────────────
 Promise.all([
+  loadJSON("adm1.json", true),
   loadJSON("china.json", true),
   loadJSON("usa.json", false),
-  loadJSON("adm1.json", true),
-]).then(([china, us, adm1]) => {
+]).then(([adm1, china, us ]) => {
+  RAW_ADM1  = adm1;
   RAW_CHINA = china;
   RAW_USA   = us;
-  RAW_ADM1  = adm1;
+
 
   updatePlaces();
 
@@ -284,33 +288,35 @@ function draw() {
   // Ocean
   ctx.beginPath();
   geoPath({ type:"Sphere" });
-  ctx.fillStyle = "#1a2744";
+  ctx.fillStyle = "#161d2e";   // "#1a2744";
   ctx.fill();
 
   // Graticule
   ctx.beginPath();
   geoPath(d3.geoGraticule()());
-  ctx.strokeStyle = "rgba(255,255,255,0.06)";
-  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.01)";
+  ctx.lineWidth = 0.2;
   ctx.stroke();
 
   // Land
   LAND.features.forEach(f => {
     ctx.beginPath();
     geoPath(f);
-    ctx.fillStyle = "#4a4a50";
+    ctx.fillStyle = "#3b3931" ; // "#4a4a50";
     ctx.fill();
   });
 
   // World country outlines
   if (activeLayers.countries) {
     COUNTRIES.features.forEach(f => {
+		
+			const color = getColor(f);
       ctx.beginPath();
       geoPath(f);
-			ctx.fillStyle = "#7c8075";
-      // ctx.strokeStyle = "rgba(180,180,190,0.35)";
+			ctx.fillStyle = color + "80"; //"#4d4a3f";	//"#7c8075";
+      ctx.strokeStyle = "#9c9889";  //"rgba(180,180,190,0.35)";
 			// ctx.fillStyle = "#4a4a50";
-      // ctx.lineWidth = 1.2;
+      ctx.lineWidth = 3;
       ctx.fill();
     });
   }
@@ -323,10 +329,10 @@ function draw() {
     const color = getColor(d);
     ctx.beginPath();
     geoPath({ type:"Feature", geometry: geo });
-    ctx.fillStyle = color + "55";
+    ctx.fillStyle = color + "70";
     ctx.fill("evenodd");
-    ctx.strokeStyle = "#4a4a50";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#615858"; //"#4a4a50";
+    ctx.lineWidth = 0.7;
     ctx.stroke();
   });
 
@@ -335,8 +341,8 @@ function draw() {
     PROVINCES.features.forEach(f => {
       ctx.beginPath();
       geoPath(f);
-      ctx.strokeStyle = "#9c9c9c"; //"rgba(180,180,190,0.35)";
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#5e5c5c";  //"#9c9c9c"; //"rgba(180,180,190,0.35)";
+      ctx.lineWidth = 1;
       ctx.stroke();
     });
   }
@@ -346,8 +352,8 @@ function draw() {
     US_STATES.features.forEach(f => {
       ctx.beginPath();
       geoPath(f);
-      ctx.strokeStyle = "#9c9c9c"; //"rgba(180,180,190,0.35)";
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#5e5c5c"; //"rgba(180,180,190,0.35)";
+      ctx.lineWidth = 1;
       ctx.stroke();
     });
   }
@@ -362,7 +368,7 @@ function draw() {
       if (!geo) return;
 
       const p = d.properties || {};
-      const label = p.county_label || p.coun_label || p.NAME || p.name || "";
+      const label = p.county_label || p.coun_label;// || p.NAME; // || p.name || "";
       if (!label) return;
 
       const centroid = geoPath.centroid({ type:"Feature", geometry: geo });

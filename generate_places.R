@@ -84,6 +84,7 @@ st_write(
   driver = "GeoJSON",
   delete_dsn = TRUE
 )
+#us_out$county_name[us_out$state_name=='Oklahoma']
 st_write(
   us_out,
   "C:/Users/zhang/GitHub/teng-globe/usa.json",
