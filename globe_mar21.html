@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Places I've Been</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#06080f; overflow:hidden; width:100vw; height:100vh; }
+  canvas { position:fixed; inset:0; width:100vw; height:100vh; cursor:grab; }
+  canvas:active { cursor:grabbing; }
+
+  /* ── shared button style ── */
+  .btn {
+    background: rgba(6,8,15,0.82);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #64748b;
+    font-family: 'Barlow Condensed', Georgia, serif;
+    font-size: 0.78rem; letter-spacing: 0.18em;
+    text-transform: uppercase; padding: 7px 16px;
+    border-radius: 20px; cursor: pointer;
+    transition: color 0.18s, border-color 0.18s;
+    z-index: 10;
+  }
+  .btn:hover  { color: #e2e8f0; border-color: rgba(255,255,255,0.3); }
+  .btn.active { color: #e2e8f0; border-color: rgba(255,255,255,0.4); }
+  .btn.stopped{ color: #475569; border-color: rgba(255,255,255,0.08); }
+
+  /* ── title ── */
+  h1 {
+    position:fixed; top:24px; left:50%; transform:translateX(-50%);
+    font-family:'Barlow Condensed', Georgia, serif; font-size:1rem;
+    font-weight:600; letter-spacing:0.3em; text-transform:uppercase;
+    color:#e2e8f0; pointer-events:none; white-space:nowrap; z-index:10;
+  }
+
+  /* ── bottom bar — spin + layer toggles ── */
+  #controls {
+    position: fixed; bottom: 22px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center;
+    z-index: 10;
+  }
+
+  /* divider between spin and layer buttons */
+  .divider {
+    width: 1px; height: 20px;
+    background: rgba(255,255,255,0.12);
+  }
+</style>
+</head>
+<body>
+<h1>Places I've Been</h1>
+<canvas id="c"></canvas>
+<button id="btn-spin">⏸ Pause</button>
+<script>
+
+// ── COLOR MAP ─────────────────────────────────────────────────────────────────
+// Reads the 'period' property from each feature and maps it to a color.
+// Add entries here to match whatever values appear in your JSON files.
+const COLOR_ATTR = "batch";   // attribute name in your GeoJSON properties
+
+const COLOR_MAP = {
+  "Blue":     "#3b82f6",  // clean modern blue
+  "Green":    "#22c55e",  // vivid but not harsh
+  "Brown":    "#8b5e3c",  // earthy, readable
+  "Teal":     "#14b8a6",  // cool teal
+  "Purple":   "#8b5cf6",  // soft purple
+  "Cyan":     "#06b6d4",  // bright cyan
+  "Orange":   "#f97316",  // strong orange
+	"Orchid":   "#ba55d3",  // muted purple
+  "Magenta":  "#d946ef",  // punchy but not neon
+  "Red":      "#ef4444",  // standard red
+  "Dark Red": "#991b1b",  // deep contrast red
+  "Yellow":   "#eab308",  // warm yellow (not too pale)
+	
+	"Grey":			"#6b6b6b",
+	"White":		"#f5f5f5",
+  "default":  "#94a3b8"   // neutral gray
+};
+
+function getColor(feature) {
+  const val = feature.properties && feature.properties[COLOR_ATTR];
+  return COLOR_MAP[val] || COLOR_MAP["default"];
+}
+
+// ── WINDING ORDER ─────────────────────────────────────────────────────────────
+// D3 expects clockwise rings. If your file is CCW, set needsRewind = true.
+// If your file is already CW (like US Census data), set needsRewind = false.
+// Each file is loaded with its own setting — see loadJSON() calls below.
+function rewind(f) {
+  const geom = f.geometry;
+  if (!geom) return f;
+  const rev = ring => ring.slice().reverse();
+  let coords;
+  if      (geom.type === "Polygon")      coords = geom.coordinates.map(rev);
+  else if (geom.type === "MultiPolygon") coords = geom.coordinates.map(p => p.map(rev));
+  else return f;
+  return { ...f, geometry: { ...geom, coordinates: coords } };
+}
+
+function loadJSON(url, needsRewind) {
+  return fetch(url)
+    .then(r => { if (!r.ok) throw new Error(url + " " + r.status); return r.json(); })
+    .then(data => {
+      const raw = Array.isArray(data) ? data : (data.features || []);
+      return needsRewind ? raw.map(rewind) : raw;
+    });
+}
+
+// ── BASEMAP ───────────────────────────────────────────────────────────────────
+let LAND = { features: [] };
+fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+  .then(r => r.json())
+  .then(topo => { LAND = topojson.feature(topo, topo.objects.countries); draw(); });
+
+// ── LOAD DATA FILES ───────────────────────────────────────────────────────────
+// china.json is CCW → needsRewind = true
+// us.json    is CW  → needsRewind = false
+// Add more files to Promise.all as needed
+let PLACES = [];
+Promise.all([
+  loadJSON("china.json", true),   // CCW → rewind
+  loadJSON("usa.json",    false),  // CW  → no rewind
+  loadJSON("adm1.json",    false),  // CW  → no rewind
+	
+]).then(([china, us, adm1]) => {
+  PLACES = [...china, ...us, ...adm1];
+  console.log("Loaded:", PLACES.length, "total features",
+              "(china:", china.length, "us:", us.length,  adm1.length, ")");
+  draw();
+}).catch(err => console.error(err));
+
+
+let PROVINCES = { features: [] };
+fetch("cn_province_display.geojson")
+  .then(r => r.json())
+  .then(data => {
+    PROVINCES.features = Array.isArray(data) ? data : (data.features || []);
+    draw();
+  });
+
+let US_STATES = { features: [] };
+fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json")
+  .then(r => r.json())
+  .then(topo => {
+    US_STATES = topojson.feature(topo, topo.objects.states);
+    draw();
+  });
+
+let COUNTRIES = { features: [] };
+fetch("world_display.json")
+  .then(r => r.json())
+  .then(data => {
+    COUNTRIES.features = Array.isArray(data) ? data : (data.features || []);
+    draw();
+  });
+	
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById("c");
+const ctx    = canvas.getContext("2d");
+function W() { return window.innerWidth;  }
+function H() { return window.innerHeight; }
+function R() { return Math.min(W(), H()) * 0.44; }
+function resizeCanvas() { canvas.width = W(); canvas.height = H(); }
+resizeCanvas();
+
+const proj = d3.geoOrthographic()
+  .scale(R()).translate([W()/2, H()/2])
+  .clipAngle(90).rotate([97, -38]);
+const geoPath = d3.geoPath().projection(proj).context(ctx);
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw() {
+  ctx.fillStyle = "#06080f";
+  ctx.fillRect(0, 0, W(), H());
+
+  const cx = proj.translate()[0], cy = proj.translate()[1], r = proj.scale();
+  const grd = ctx.createRadialGradient(cx, cy, r*0.7, cx, cy, r*1.4);
+  grd.addColorStop(0, "rgba(30,80,220,0.13)");
+  grd.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.beginPath(); ctx.arc(cx, cy, r*1.4, 0, Math.PI*2);
+  ctx.fillStyle = grd; ctx.fill();
+
+  // Ocean
+  ctx.beginPath(); geoPath({ type:"Sphere" });
+  ctx.fillStyle = "#1a2744"; ctx.fill();
+
+  // Graticule
+  ctx.beginPath(); geoPath(d3.geoGraticule()());
+  ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.lineWidth = 0.5; ctx.stroke();
+
+  // Land
+  LAND.features.forEach(f => {
+    ctx.beginPath(); geoPath(f);
+    ctx.fillStyle = "#4a4a50"; 
+		ctx.fill();
+    //ctx.strokeStyle = "#4a6fa5"; ctx.lineWidth = 0.7; ctx.stroke();
+  });
+
+
+
+	// WORLD COUNTRIES outlines
+	COUNTRIES.features.forEach(f => {
+		const color = getColor(f);
+		ctx.beginPath();
+		geoPath(f);
+		ctx.fillStyle = color + "55";
+		ctx.strokeStyle = "rgba(180,180,190,0.35)";
+		ctx.lineWidth   = 1.5;
+		ctx.stroke();
+	}); 
+
+
+  // Visited polygon fills
+  PLACES.forEach(d => {
+    const geo = d.geo || d.geometry;
+    if (!geo) return;
+    const color = getColor(d);
+    ctx.beginPath();
+    geoPath({ type:"Feature", geometry:geo });
+    ctx.fillStyle = color + "55";
+    ctx.fill("evenodd");
+    ctx.strokeStyle = "#4a4a50";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+	
+	
+	// Province / state outlines — borders only, no fill
+	PROVINCES.features.forEach(f => {
+		ctx.beginPath();
+		geoPath(f);
+		ctx.strokeStyle = "rgba(180,180,190,0.35)";  // subtle light grey
+		ctx.lineWidth   = 1.5;
+		ctx.stroke();
+		// no ctx.fill() — outlines only
+	});
+
+	// US state outlines
+	US_STATES.features.forEach(f => {
+		ctx.beginPath();
+		geoPath(f);
+		ctx.strokeStyle = "rgba(180,180,190,0.35)";
+		ctx.lineWidth   = 1.5;
+		ctx.stroke();
+	}); 		
+	
+	// Labels		
+  const baseR   = Math.min(W(), H()) * 0.44;
+  const zoomLvl = proj.scale() / baseR;   // 1 = default, >1 = zoomed in
+
+
+  if (zoomLvl > 10) {
+    // County / place label — smaller, only shows when more zoomed in
+    PLACES.forEach(d => {
+      const geo = d.geo || d.geometry;
+      if (!geo) return;
+
+      const p = d.properties || {};
+      // Adjust field names to match your GeoJSON properties
+      const label = p.county_label || p.coun_label || p.NAME || p.name || "";
+      if (!label) return;
+
+      const centroid = geoPath.centroid({ type:"Feature", geometry:geo });
+      if (!centroid || isNaN(centroid[0])) return;
+
+      // Visibility check
+      const bounds = d3.geoBounds({ type:"Feature", geometry:geo });
+      const midLng  = (bounds[0][0] + bounds[1][0]) / 2;
+      const midLat  = (bounds[0][1] + bounds[1][1]) / 2;
+      const rot     = proj.rotate();
+      const lam0    = -rot[0] * Math.PI/180, phi0 = -rot[1] * Math.PI/180;
+      const lam     =  midLng  * Math.PI/180, phi  =  midLat  * Math.PI/180;
+      const dot     = Math.sin(phi0)*Math.sin(phi) + Math.cos(phi0)*Math.cos(phi)*Math.cos(lam-lam0);
+      if (dot < 0.2) return;
+
+      const alpha = Math.min(1, (zoomLvl - 2.8) / 0.5);  // fade in
+      ctx.globalAlpha = alpha;
+      ctx.font = "11px 'Arial Narrow', 'Microsoft YaHei', 'PingFang SC' ";  // , sans-serif  Barlow Condensed also good choice
+			//add this to the beginning ... if you want Barlow Consensed <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600&display=swap" rel="stylesheet">
+			
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      //ctx.strokeStyle = "rgba(0,0,0,0.75)";
+      ctx.lineWidth = 2;
+      //ctx.strokeText(label, centroid[0], centroid[1]);
+      ctx.fillStyle = "rgba(220,220,230,0.9)";
+      ctx.fillText(label, centroid[0], centroid[1]);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+
+  // Globe rim
+  ctx.beginPath(); geoPath({ type:"Sphere" });
+  ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+
+// ── LAYER TOGGLES ─────────────────────────────────────────────────────────────
+document.querySelectorAll("[data-layer]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const layer = btn.dataset.layer;
+    activeLayers[layer] = !activeLayers[layer];
+    btn.classList.toggle("active", activeLayers[layer]);
+    updatePlaces();
+    draw();
+  });
+});
+
+// ── SPIN + BUTTON ─────────────────────────────────────────────────────────────
+let spinning = false;
+const btn = document.getElementById("btn-spin");
+
+btn.addEventListener("click", () => {
+  spinning = !spinning;
+  btn.textContent = spinning ? "⏸ Pause" : "▶ Spin";
+  btn.classList.toggle("stopped", !spinning);
+});
+
+d3.timer(() => {
+  if (!spinning) return;
+  const r = proj.rotate(); proj.rotate([r[0]+0.12, r[1]]); draw();
+});
+
+// ── DRAG ──────────────────────────────────────────────────────────────────────
+let drag = null, rot0 = null;
+canvas.addEventListener("mousedown", e => {
+  spinning = false;
+  btn.textContent = "▶ Spin"; btn.classList.add("stopped");
+  drag = [e.clientX, e.clientY]; rot0 = proj.rotate().slice();
+});
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  proj.rotate([rot0[0]+(e.clientX-drag[0])*0.2, rot0[1]-(e.clientY-drag[1])*0.2]);
+  draw();
+});
+window.addEventListener("mouseup", () => { drag = null; });
+
+// ── ZOOM ──────────────────────────────────────────────────────────────────────
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const base = Math.min(W(), H()) * 0.15;
+  proj.scale(Math.max(base, Math.min(base*100, proj.scale()-e.deltaY*1.2)));
+  draw();
+}, { passive:false });
+
+// ── RESIZE ────────────────────────────────────────────────────────────────────
+window.addEventListener("resize", () => {
+  resizeCanvas(); proj.translate([W()/2, H()/2]); draw();
+});
+
+draw();
+</script>
+</body>
+</html>

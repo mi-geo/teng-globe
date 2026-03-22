@@ -33,47 +33,8 @@ options(tigris_use_cache = TRUE)   # cache tigris downloads locally
 SIMPLIFY    <- 0.05    # 0 = full detail, 1 = maximum simplification
 us_places <- st_read( "C:/Users/zhang/Data_Research/globe/usa.geojson" )
 cn_places <- st_read( "C:/Users/zhang/Data_Research/globe/china.geojson" )
-
-# save the files to management.xlsx
-# ── China ─────────────────────────────────────────────────────────────────────
-cn_df <- cn_places |>
-  st_drop_geometry() |>                          # remove geometry
-  arrange(prov_name, pref_name) |>               # sort by province then prefecture
-  mutate( section = NA, travelled = NA)            # add two empty columns
-
-# ── US ────────────────────────────────────────────────────────────────────────
-us_df <- us_places |>
-  st_drop_geometry() |>
-  arrange(state_name, county_name) |>            # sort by state then county
-  mutate(section = NA, travelled = NA)
-state_map <- c(
-  AL = "Alabama", AK = "Alaska", AZ = "Arizona", AR = "Arkansas",
-  CA = "California", CO = "Colorado", CT = "Connecticut",
-  DE = "Delaware", FL = "Florida", GA = "Georgia",
-  HI = "Hawaii", ID = "Idaho", IL = "Illinois", IN = "Indiana",
-  IA = "Iowa", KS = "Kansas", KY = "Kentucky", LA = "Louisiana",
-  ME = "Maine", MD = "Maryland", MA = "Massachusetts",
-  MI = "Michigan", MN = "Minnesota", MS = "Mississippi",
-  MO = "Missouri", MT = "Montana", NE = "Nebraska",
-  NV = "Nevada", NH = "New Hampshire", NJ = "New Jersey",
-  NM = "New Mexico", NY = "New York", NC = "North Carolina",
-  ND = "North Dakota", OH = "Ohio", OK = "Oklahoma",
-  OR = "Oregon", PA = "Pennsylvania", RI = "Rhode Island",
-  SC = "South Carolina", SD = "South Dakota", TN = "Tennessee",
-  TX = "Texas", UT = "Utah", VT = "Vermont",
-  VA = "Virginia", WA = "Washington", WV = "West Virginia",
-  WI = "Wisconsin", WY = "Wyoming", DC = "District of Columbia"
-)
-state_map_rev <- setNames(names(state_map), state_map)
-us_df$state_sn <- state_map_rev[us_df$state_name]
-
-# ── Write to manage.xlsx ──────────────────────────────────────────────────────
-library(writexl)
-write_xlsx(
-  list(CN = cn_df, US = us_df),
-  "C:/Users/zhang/GitHub/teng-globe/data_entry.xlsx"
-)
-message("Saved manage.xlsx with ", nrow(cn_df), " China rows and ", nrow(us_df), " US rows")
+ad_places <- st_read( "C:/Users/zhang/Data_Research/globe/world_prov.geojson" )
+wd_places <- st_read( "C:/Users/zhang/Data_Research/globe/world_sovn.geojson" )
 
 
 # read management.xlsx , 
@@ -81,10 +42,18 @@ message("Saved manage.xlsx with ", nrow(cn_df), " China rows and ", nrow(us_df),
 # ── Read management file ──────────────────────────────────────────────────────
 cn_manage <- read_xlsx("data_entry.xlsx", sheet = "CN")
 us_manage <- read_xlsx("data_entry.xlsx", sheet = "US")
+ad_manage <- read_xlsx("data_entry.xlsx", sheet = "Adm1")
+wd_manage <- read_xlsx("data_entry.xlsx", sheet = "World")
+
+
 
 # ── Filter to visited only ────────────────────────────────────────────────────
 cn_visited <- cn_manage |> filter(travelled == 1)
 us_visited <- us_manage |> filter(travelled == 1)
+ad_visited <- ad_manage |> filter(travelled == 1)
+wd_visited <- wd_manage |> filter(travelled == 1)
+
+
 
 cn_places$coun_label <- NULL
 cn_out <- cn_places |>
@@ -97,6 +66,18 @@ us_out <- us_places |>
     us_visited |> select(fips5, coun_label,batch ),
     by = "fips5"
   )
+ad_out <- ad_places |>
+  inner_join(
+    ad_visited |> select(iso_3166_2 , name, type, batch ),
+    by = c("iso_3166_2","name",'type')
+  )
+wd_out <- wd_places |>
+  inner_join(
+    wd_visited |> select(GEOUNIT, batch ),
+    by = "GEOUNIT"
+  )
+
+
 st_write(
   cn_out,
   "C:/Users/zhang/GitHub/teng-globe/china.json",
@@ -109,5 +90,14 @@ st_write(
   driver = "GeoJSON",
   delete_dsn = TRUE
 )
+ad_out <- ms_simplify(sf_geojson(ad_out), keep = 0.2) 
+# Saving the JSON file
+writeLines(ad_out, "C:/Users/zhang/GitHub/teng-globe/adm1.json")
 
+wd_out <- ms_simplify(sf_geojson(wd_out), keep = 0.05) 
+# Saving the JSON file
+writeLines(wd_out, "C:/Users/zhang/GitHub/teng-globe/world.json")
 
+plot(st_read(wd_out)[1][3,])
+plot(st_read(ad_out)[1][3,])
+plot(gdf_prov$name[1])
