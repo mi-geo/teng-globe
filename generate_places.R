@@ -26,6 +26,7 @@ library(tigris)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(cnmap)
+library(readxl)
 
 options(tigris_use_cache = TRUE)   # cache tigris downloads locally
 
