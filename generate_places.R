@@ -32,10 +32,10 @@ options(tigris_use_cache = TRUE)   # cache tigris downloads locally
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SIMPLIFY    <- 0.05    # 0 = full detail, 1 = maximum simplification
-us_places <- st_read( "C:/Users/zhang/Data_Research/globe/usa.geojson" )
-cn_places <- st_read( "C:/Users/zhang/Data_Research/globe/china.geojson" )
-ad_places <- st_read( "C:/Users/zhang/Data_Research/globe/world_prov.geojson" )
-wd_places <- st_read( "C:/Users/zhang/Data_Research/globe/world_sovn.geojson" )
+us_places <- st_read( "C:/Users/teng/Data_Research/globe/usa.geojson" )
+cn_places <- st_read( "C:/Users/teng/Data_Research/globe/china.geojson" )
+ad_places <- st_read( "C:/Users/teng/Data_Research/globe/world_prov.geojson" )
+wd_places <- st_read( "C:/Users/teng/Data_Research/globe/world_sovn.geojson" )
 
 
 # read management.xlsx , 
@@ -81,24 +81,24 @@ wd_out <- wd_places |>
 
 st_write(
   cn_out,
-  "C:/Users/zhang/GitHub/teng-globe/china.json",
+  "C:/Users/teng/GitHub/teng-globe/china.json",
   driver = "GeoJSON",
   delete_dsn = TRUE
 )
 #us_out$county_name[us_out$state_name=='Oklahoma']
 st_write(
   us_out,
-  "C:/Users/zhang/GitHub/teng-globe/usa.json",
+  "C:/Users/teng/GitHub/teng-globe/usa.json",
   driver = "GeoJSON",
   delete_dsn = TRUE
 )
 ad_out <- ms_simplify(sf_geojson(ad_out), keep = 0.2) 
 # Saving the JSON file
-writeLines(ad_out, "C:/Users/zhang/GitHub/teng-globe/adm1.json")
+writeLines(ad_out, "C:/Users/teng/GitHub/teng-globe/adm1.json")
 
 wd_out <- ms_simplify(sf_geojson(wd_out), keep = 0.05) 
 # Saving the JSON file
-writeLines(wd_out, "C:/Users/zhang/GitHub/teng-globe/world.json")
+writeLines(wd_out, "C:/Users/teng/GitHub/teng-globe/world.json")
 
 plot(st_read(wd_out)[1][3,])
 plot(st_read(ad_out)[1][3,])
