@@ -38,8 +38,9 @@ ad_places <- st_read( "C:/Users/teng/Data_Research/globe/world_prov.geojson" )
 wd_places <- st_read( "C:/Users/teng/Data_Research/globe/world_sovn.geojson" )
 
 
-# read management.xlsx , 
+# read management.xlsx
 # and select and merge the data where 'travelled' == 1
+setwd('C:/Users/Teng/GitHub/teng-globe/')
 # ── Read management file ──────────────────────────────────────────────────────
 cn_manage <- read_xlsx("data_entry.xlsx", sheet = "CN")
 us_manage <- read_xlsx("data_entry.xlsx", sheet = "US")
