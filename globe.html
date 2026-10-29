@@ -269,6 +269,91 @@ const proj = d3.geoOrthographic()
   .rotate([97, -38]);
 
 const geoPath = d3.geoPath().projection(proj).context(ctx);
+const labelGeometryCache = new WeakMap();
+const labelWidthCache = new Map();
+const labelPlacementCache = new WeakMap();
+const labelFont = "11px 'Arial Narrow', 'Microsoft YaHei', 'PingFang SC'";
+
+function getLabelGeometry(geo) {
+  let cached = labelGeometryCache.get(geo);
+  if (!cached) {
+    const feature = { type: "Feature", geometry: geo };
+    const bounds = d3.geoBounds(feature);
+    cached = {
+      centroid: d3.geoCentroid(feature),
+      midLng: (bounds[0][0] + bounds[1][0]) / 2,
+      midLat: (bounds[0][1] + bounds[1][1]) / 2
+    };
+    labelGeometryCache.set(geo, cached);
+  }
+  return cached;
+}
+
+function layoutLabels(labels) {
+  labels.sort((a, b) => b.text.length - a.text.length);
+  const cellSize = 36, padding = 3, grid = new Map(), placed = [];
+
+  function box(label, x, y) {
+    return {
+      ...label, x, y,
+      left: x - label.width / 2 - padding,
+      right: x + label.width / 2 + padding,
+      top: y - label.height / 2 - padding,
+      bottom: y + label.height / 2 + padding
+    };
+  }
+
+  function cells(b) {
+    const keys = [];
+    for (let x = Math.floor(b.left / cellSize); x <= Math.floor(b.right / cellSize); x++)
+      for (let y = Math.floor(b.top / cellSize); y <= Math.floor(b.bottom / cellSize); y++)
+        keys.push(`${x},${y}`);
+    return keys;
+  }
+
+  function fits(b) {
+    const seen = new Set();
+    for (const key of cells(b)) for (const i of grid.get(key) || []) {
+      if (seen.has(i)) continue;
+      seen.add(i);
+      const a = placed[i];
+      if (b.left < a.right && b.right > a.left && b.top < a.bottom && b.bottom > a.top) return false;
+    }
+    return true;
+  }
+
+  function reserve(b) {
+    const i = placed.push(b) - 1;
+    for (const key of cells(b)) {
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    }
+  }
+
+  for (const label of labels) {
+    const side = label.width / 2 + 18, far = label.width / 2 + 48;
+    const offsets = [
+      [0, 0], [0, -22], [0, 22], [-side, 0], [side, 0], [0, -42], [0, 42],
+      [-far, 0], [far, 0], [-side, -22], [side, -22], [-side, 22], [side, 22],
+      [-far, -22], [far, -22], [-far, 22], [far, 22]
+    ];
+    const previous = labelPlacementCache.get(label.feature);
+    if (previous) {
+      const i = offsets.findIndex(([x, y]) => x === previous[0] && y === previous[1]);
+      if (i > 0) offsets.unshift(offsets.splice(i, 1)[0]);
+    }
+
+    for (const [dx, dy] of offsets) {
+      const candidate = box(label, label.anchorX + dx, label.anchorY + dy);
+      if (!fits(candidate)) continue;
+      reserve(candidate);
+      labelPlacementCache.set(label.feature, [dx, dy]);
+      break;
+    }
+  }
+
+  return { labels: placed, padding };
+}
 
 // ── DRAW ─────────────────────────────────────────────────────────────────────
 function draw() {
@@ -367,7 +452,12 @@ function draw() {
 
   if (zoomLvl > 10) {
     const labels = [];
-    ctx.font = "11px 'Arial Narrow', 'Microsoft YaHei', 'PingFang SC'";
+    ctx.font = labelFont;
+    const rot = proj.rotate();
+    const lam0 = -rot[0] * Math.PI / 180;
+    const phi0 = -rot[1] * Math.PI / 180;
+    const sinPhi0 = Math.sin(phi0);
+    const cosPhi0 = Math.cos(phi0);
 
     PLACES.forEach(d => {
       const geo = d.geo || d.geometry;
@@ -379,89 +469,61 @@ function draw() {
       const label = p.prov_label || p.county_label || p.coun_label;
       if (!label) return;
 
-      const centroid = geoPath.centroid({ type:"Feature", geometry: geo });
-      if (!centroid || isNaN(centroid[0])) return;
+      const geometry = getLabelGeometry(geo);
+      const centroidGeo = geometry.centroid;
+      if (!centroidGeo || !Number.isFinite(centroidGeo[0]) || !Number.isFinite(centroidGeo[1])) return;
 
-      const bounds = d3.geoBounds({ type:"Feature", geometry: geo });
-      const midLng = (bounds[0][0] + bounds[1][0]) / 2;
-      const midLat = (bounds[0][1] + bounds[1][1]) / 2;
-
-      const rot = proj.rotate();
-      const lam0 = -rot[0] * Math.PI / 180;
-      const phi0 = -rot[1] * Math.PI / 180;
-      const lam  =  midLng  * Math.PI / 180;
-      const phi  =  midLat  * Math.PI / 180;
+      const lam  = geometry.midLng * Math.PI / 180;
+      const phi  = geometry.midLat * Math.PI / 180;
 
       const dot =
-        Math.sin(phi0) * Math.sin(phi) +
-        Math.cos(phi0) * Math.cos(phi) * Math.cos(lam - lam0);
+        sinPhi0 * Math.sin(phi) +
+        cosPhi0 * Math.cos(phi) * Math.cos(lam - lam0);
 
       if (dot < 0.2) return;
 
-      const width = ctx.measureText(label).width;
+      const centroid = proj(centroidGeo);
+      if (!centroid || !Number.isFinite(centroid[0]) || !Number.isFinite(centroid[1])) return;
+
+      if (!labelWidthCache.has(label)) {
+        labelWidthCache.set(label, ctx.measureText(label).width);
+      }
+      const width = labelWidthCache.get(label);
       const height = 13;
-      const padding = 3;
       labels.push({
+        feature: d,
         text: label,
-        x: centroid[0],
-        y: centroid[1],
-        left: centroid[0] - width / 2 - padding,
-        right: centroid[0] + width / 2 + padding,
-        top: centroid[1] - height / 2 - padding,
-        bottom: centroid[1] + height / 2 + padding
+        anchorX: centroid[0],
+        anchorY: centroid[1],
+        width,
+        height
       });
     });
 
-    // Draw longer names first, then use a small screen-space grid to reject
-    // labels that would collide with a label already placed.
-    labels.sort((a, b) => b.text.length - a.text.length);
-    const cellSize = 32;
-    const occupied = new Map();
-    const accepted = [];
-
-    labels.forEach(label => {
-      const minX = Math.floor(label.left / cellSize);
-      const maxX = Math.floor(label.right / cellSize);
-      const minY = Math.floor(label.top / cellSize);
-      const maxY = Math.floor(label.bottom / cellSize);
-      const checked = new Set();
-      let overlaps = false;
-
-      for (let gx = minX; gx <= maxX && !overlaps; gx++) {
-        for (let gy = minY; gy <= maxY && !overlaps; gy++) {
-          const cell = occupied.get(`${gx},${gy}`);
-          if (!cell) continue;
-
-          for (const index of cell) {
-            if (checked.has(index)) continue;
-            checked.add(index);
-            const other = accepted[index];
-            if (label.left < other.right && label.right > other.left &&
-                label.top < other.bottom && label.bottom > other.top) {
-              overlaps = true;
-              break;
-            }
-          }
-        }
-      }
-
-      if (overlaps) return;
-
-      const index = accepted.push(label) - 1;
-      for (let gx = minX; gx <= maxX; gx++) {
-        for (let gy = minY; gy <= maxY; gy++) {
-          const key = `${gx},${gy}`;
-          if (!occupied.has(key)) occupied.set(key, []);
-          occupied.get(key).push(index);
-        }
-      }
-    });
+    const { labels: accepted, padding } = layoutLabels(labels);
 
     const alpha = Math.min(1, (zoomLvl - 2.8) / 0.5);
     ctx.globalAlpha = alpha;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "rgba(220,220,230,0.9)";
+
+    accepted.forEach(label => {
+      const dx = label.x - label.anchorX;
+      const dy = label.y - label.anchorY;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+
+      const edgeScaleX = dx === 0 ? Infinity : (label.width / 2 + padding) / Math.abs(dx);
+      const edgeScaleY = dy === 0 ? Infinity : (label.height / 2 + padding) / Math.abs(dy);
+      const edgeScale = Math.min(edgeScaleX, edgeScaleY);
+      ctx.beginPath();
+      ctx.moveTo(label.anchorX, label.anchorY);
+      ctx.lineTo(label.x - dx * edgeScale, label.y - dy * edgeScale);
+      ctx.strokeStyle = "rgba(220,220,230,0.32)";
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+    });
+
     accepted.forEach(label => {
       ctx.fillText(label.text, label.x, label.y);
     });
