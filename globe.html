@@ -366,12 +366,17 @@ function draw() {
   const zoomLvl = proj.scale() / baseR;
 
   if (zoomLvl > 10) {
+    const labels = [];
+    ctx.font = "11px 'Arial Narrow', 'Microsoft YaHei', 'PingFang SC'";
+
     PLACES.forEach(d => {
       const geo = d.geo || d.geometry;
       if (!geo) return;
 
       const p = d.properties || {};
-      const label = p.county_label || p.coun_label;// || p.NAME; // || p.name || "";
+      if (p.cnus === 1 || p.cnus === "1") return;
+
+      const label = p.prov_label || p.county_label || p.coun_label;
       if (!label) return;
 
       const centroid = geoPath.centroid({ type:"Feature", geometry: geo });
@@ -393,15 +398,74 @@ function draw() {
 
       if (dot < 0.2) return;
 
-      const alpha = Math.min(1, (zoomLvl - 2.8) / 0.5);
-      ctx.globalAlpha = alpha;
-      ctx.font = "11px 'Arial Narrow', 'Microsoft YaHei', 'PingFang SC'";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(220,220,230,0.9)";
-      ctx.fillText(label, centroid[0], centroid[1]);
-      ctx.globalAlpha = 1;
+      const width = ctx.measureText(label).width;
+      const height = 13;
+      const padding = 3;
+      labels.push({
+        text: label,
+        x: centroid[0],
+        y: centroid[1],
+        left: centroid[0] - width / 2 - padding,
+        right: centroid[0] + width / 2 + padding,
+        top: centroid[1] - height / 2 - padding,
+        bottom: centroid[1] + height / 2 + padding
+      });
     });
+
+    // Draw longer names first, then use a small screen-space grid to reject
+    // labels that would collide with a label already placed.
+    labels.sort((a, b) => b.text.length - a.text.length);
+    const cellSize = 32;
+    const occupied = new Map();
+    const accepted = [];
+
+    labels.forEach(label => {
+      const minX = Math.floor(label.left / cellSize);
+      const maxX = Math.floor(label.right / cellSize);
+      const minY = Math.floor(label.top / cellSize);
+      const maxY = Math.floor(label.bottom / cellSize);
+      const checked = new Set();
+      let overlaps = false;
+
+      for (let gx = minX; gx <= maxX && !overlaps; gx++) {
+        for (let gy = minY; gy <= maxY && !overlaps; gy++) {
+          const cell = occupied.get(`${gx},${gy}`);
+          if (!cell) continue;
+
+          for (const index of cell) {
+            if (checked.has(index)) continue;
+            checked.add(index);
+            const other = accepted[index];
+            if (label.left < other.right && label.right > other.left &&
+                label.top < other.bottom && label.bottom > other.top) {
+              overlaps = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (overlaps) return;
+
+      const index = accepted.push(label) - 1;
+      for (let gx = minX; gx <= maxX; gx++) {
+        for (let gy = minY; gy <= maxY; gy++) {
+          const key = `${gx},${gy}`;
+          if (!occupied.has(key)) occupied.set(key, []);
+          occupied.get(key).push(index);
+        }
+      }
+    });
+
+    const alpha = Math.min(1, (zoomLvl - 2.8) / 0.5);
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(220,220,230,0.9)";
+    accepted.forEach(label => {
+      ctx.fillText(label.text, label.x, label.y);
+    });
+    ctx.globalAlpha = 1;
   }
 
   // Globe rim

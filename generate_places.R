@@ -70,7 +70,7 @@ us_out <- us_places |>
   )
 ad_out <- ad_places |>
   inner_join(
-    ad_visited |> select(iso_3166_2 , name, type, batch ),
+    ad_visited |> select(iso_3166_2, name,min_zoom, prov_label, type, batch, cnus ),
     by = c("iso_3166_2","name",'type')
   )
 wd_out <- wd_places |>
